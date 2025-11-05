@@ -1,0 +1,575 @@
+@page "/report-generator"
+@using OpenReport_Blazor.Models
+@using FastReport;
+@using FastReport.Export.PdfSimple;
+@using System.IO;
+@using Microsoft.AspNetCore.Components.Forms;
+@using Microsoft.JSInterop;
+@inject IJSRuntime JSRuntime
+@rendermode InteractiveServer
+
+<PageTitle>Report Generator</PageTitle>
+
+<h1>Report Generator</h1>
+
+<div class="container-fluid mt-4">
+    <div class="row">
+        <!-- Left Column: Upload & Data Input -->
+        <div class="col-md-6">
+            <!-- File Upload Section -->
+            <div class="card mb-4">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5>Upload .frx File</h5>
+                    <button class="btn btn-sm btn-outline-primary" @onclick="GenerateFrxTemplate" disabled="@isGeneratingFrx">
+                        <i class="bi bi-file-earmark-plus"></i> Generate Sample .frx
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="drop-zone @(isDragging ? "dragging" : "")" 
+                         @ondragenter="HandleDragEnter"
+                         @ondragleave="HandleDragLeave"
+                         @ondragover="HandleDragOver"
+                         @ondrop="HandleDrop"
+                         style="position: relative;">
+                        <InputFile OnChange="HandleFileUpload" accept=".frx" class="file-input" />
+                        <div class="drop-zone-content">
+                            <i class="bi bi-cloud-upload" style="font-size: 3rem; color: #6c757d;"></i>
+                            <p class="mt-3">
+                                <strong>Drag & drop your .frx file here</strong><br />
+                                or click to browse
+                            </p>
+                            <p class="text-muted small">Only .frx files are accepted</p>
+                        </div>
+                    </div>
+                    @if (isGeneratingFrx)
+                    {
+                        <div class="alert alert-info mt-3">
+                            <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                            Generating sample .frx template...
+                        </div>
+                    }
+                    @if (!string.IsNullOrEmpty(uploadedFileName))
+                    {
+                        <div class="alert alert-success mt-3">
+                            <i class="bi bi-check-circle"></i> 
+                            @if (uploadedFileName.StartsWith("Template generated!"))
+                            {
+                                <div>
+                                    <strong>@uploadedFileName</strong>
+                                    <div class="mt-2 small">
+                                        <strong>Steps to create a working template:</strong>
+                                        <ol class="mb-0 mt-2">
+                                            <li>Open the downloaded .frx file in FastReport Designer</li>
+                                            <li>Add a <strong>Header Band</strong> with labels: Description, Quantity, Unit Price, Total</li>
+                                            <li>Add a <strong>Data Band</strong> and bind it to the "InvoiceItems" data source</li>
+                                            <li>Add TextObjects in the Data Band with expressions: <code>[InvoiceItems.Description]</code>, <code>[InvoiceItems.Quantity]</code>, <code>[InvoiceItems.UnitPrice]</code>, <code>[InvoiceItems.Total]</code></li>
+                                            <li>Add a <strong>Footer Band</strong> with Grand Total: <code>[Sum([InvoiceItems.Total])]</code></li>
+                                            <li>Save and upload the enhanced template</li>
+                                        </ol>
+                                    </div>
+                                </div>
+                            }
+                            else
+                            {
+                                <span>File loaded: <strong>@uploadedFileName</strong></span>
+                            }
+                        </div>
+                    }
+                    @if (!string.IsNullOrEmpty(uploadError))
+                    {
+                        <div class="alert alert-danger mt-3">
+                            <i class="bi bi-exclamation-triangle"></i> @uploadError
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <!-- Invoice Items Table -->
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5>Invoice Items</h5>
+                    <button class="btn btn-sm btn-primary" @onclick="AddNewItem">
+                        <i class="bi bi-plus-circle"></i> Add Item
+                    </button>
+                </div>
+                <div class="card-body">
+                    @if (invoiceItems.Count == 0)
+                    {
+                        <p class="text-muted">No items added. Click "Add Item" to start.</p>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Description</th>
+                                        <th>Quantity</th>
+                                        <th>Unit Price</th>
+                                        <th>Total</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var item in invoiceItems)
+                                    {
+                                        <tr>
+                                            <td>
+                                                <input type="text" class="form-control form-control-sm" 
+                                                       @bind="item.Description" 
+                                                       @bind:after="StateHasChanged" />
+                                            </td>
+                                            <td>
+                                                <input type="number" class="form-control form-control-sm" 
+                                                       @bind="item.Quantity" 
+                                                       @bind:after="StateHasChanged" 
+                                                       min="1" />
+                                            </td>
+                                            <td>
+                                                <input type="number" class="form-control form-control-sm" 
+                                                       @bind="item.UnitPrice" 
+                                                       @bind:after="StateHasChanged" 
+                                                       step="0.01" min="0" />
+                                            </td>
+                                            <td class="align-middle">
+                                                <strong>@item.Total.ToString("C")</strong>
+                                            </td>
+                                            <td>
+                                                <button class="btn btn-sm btn-danger" 
+                                                        @onclick="() => RemoveItem(item)">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                                <tfoot>
+                                    <tr class="table-primary">
+                                        <th colspan="3" class="text-end">Grand Total:</th>
+                                        <th>@GrandTotal.ToString("C")</th>
+                                        <th></th>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    }
+                </div>
+                <div class="card-footer">
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button class="btn btn-primary" @onclick="GenerateReport" disabled="@(!CanGenerateReport || isGenerating)">
+                            <i class="bi bi-file-earmark-pdf"></i> Generate PDF from .frx
+                        </button>
+                        <button class="btn btn-success" @onclick="GeneratePdfFromData" disabled="@(invoiceItems.Count == 0 || isGenerating)" title="Note: FastReport requires a .frx template file. Use 'Generate .frx from Data' first.">
+                            <i class="bi bi-file-earmark-pdf-fill"></i> Generate PDF from Data
+                        </button>
+                        <button class="btn btn-outline-secondary" @onclick="GenerateFrxFromData" disabled="@(invoiceItems.Count == 0 || isGeneratingFrx)">
+                            <i class="bi bi-file-earmark-plus"></i> Generate .frx from Data
+                        </button>
+                    </div>
+                    @if (isGenerating)
+                    {
+                        <div class="mt-2">
+                            <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                            Generating PDF...
+                        </div>
+                    }
+                    @if (isGeneratingFrx)
+                    {
+                        <div class="mt-2">
+                            <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                            Generating .frx template...
+                        </div>
+                    }
+                    @if (!string.IsNullOrEmpty(uploadError) && !string.IsNullOrEmpty(uploadedFileName))
+                    {
+                        <div class="alert alert-danger mt-2 mb-0">
+                            <i class="bi bi-exclamation-triangle"></i> @uploadError
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: PDF Preview -->
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5>PDF Preview</h5>
+                </div>
+                <div class="card-body p-0">
+                    @if (string.IsNullOrEmpty(pdfBase64))
+                    {
+                        <div class="text-center p-5 text-muted">
+                            <i class="bi bi-file-earmark-pdf" style="font-size: 4rem;"></i>
+                            <p class="mt-3">Upload a .frx file and add invoice items, then click "Generate PDF" to see the preview.</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <iframe src="data:application/pdf;base64,@pdfBase64" 
+                                style="width: 100%; height: 800px; border: none;"></iframe>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .drop-zone {
+        border: 2px dashed #6c757d;
+        border-radius: 8px;
+        padding: 3rem;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        background-color: #f8f9fa;
+    }
+
+    .drop-zone:hover {
+        border-color: #0d6efd;
+        background-color: #e7f1ff;
+    }
+
+    .drop-zone.dragging {
+        border-color: #0d6efd;
+        background-color: #cfe2ff;
+        transform: scale(1.02);
+    }
+
+    .drop-zone-content {
+        pointer-events: none;
+        cursor: pointer;
+    }
+
+    .file-input {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        opacity: 0;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+    }
+</style>
+
+@code {
+    private InputFile? fileInput;
+    private bool isDragging = false;
+    private string uploadedFileName = string.Empty;
+    private string uploadError = string.Empty;
+    private byte[]? frxFileData;
+    private List<InvoiceItem> invoiceItems = new();
+    private string pdfBase64 = string.Empty;
+    private bool isGenerating = false;
+    private bool isGeneratingFrx = false;
+
+    private bool CanGenerateReport => frxFileData != null && frxFileData.Length > 0 && invoiceItems.Count > 0;
+
+    private decimal GrandTotal => invoiceItems.Sum(item => item.Total);
+
+    private void HandleDragEnter(DragEventArgs e)
+    {
+        isDragging = true;
+    }
+
+    private void HandleDragLeave(DragEventArgs e)
+    {
+        isDragging = false;
+    }
+
+    private void HandleDragOver(DragEventArgs e)
+    {
+        // e.PreventDefault();
+    }
+
+    private void HandleDrop(DragEventArgs e)
+    {
+        isDragging = false;
+        // Let InputFile handle the actual file drop
+        // We just provide visual feedback
+    }
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        if (e.File != null)
+        {
+            if (e.File.Name.EndsWith(".frx", StringComparison.OrdinalIgnoreCase))
+            {
+                await ProcessFile(e.File);
+            }
+            else
+            {
+                uploadError = "Only .frx files are allowed.";
+                uploadedFileName = string.Empty;
+                frxFileData = null;
+            }
+        }
+    }
+
+    private async Task ProcessFile(IBrowserFile file)
+    {
+        try
+        {
+            uploadError = string.Empty;
+            uploadedFileName = file.Name;
+
+            using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024); // 10 MB max
+            using var memoryStream = new MemoryStream();
+            await stream.CopyToAsync(memoryStream);
+            frxFileData = memoryStream.ToArray();
+
+            pdfBase64 = string.Empty; // Clear previous PDF
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            uploadError = $"Error uploading file: {ex.Message}";
+            uploadedFileName = string.Empty;
+            frxFileData = null;
+        }
+    }
+
+    private void AddNewItem()
+    {
+        invoiceItems.Add(new InvoiceItem { Description = "New Item", Quantity = 1, UnitPrice = 0m });
+        StateHasChanged();
+    }
+
+    private void RemoveItem(InvoiceItem item)
+    {
+        invoiceItems.Remove(item);
+        StateHasChanged();
+    }
+
+    private async Task GenerateReport()
+    {
+        if (!CanGenerateReport || frxFileData == null)
+        {
+            uploadError = "Please upload a .frx file and add at least one invoice item.";
+            StateHasChanged();
+            return;
+        }
+
+        isGenerating = true;
+        pdfBase64 = string.Empty;
+        uploadError = string.Empty;
+        StateHasChanged();
+
+        try
+        {
+            // Create FastReport instance
+            using var report = new Report();
+            
+            // Load the .frx file from memory
+            using var frxStream = new MemoryStream(frxFileData);
+            report.Load(frxStream);
+
+            // Check if report has pages
+            if (report.Pages.Count == 0)
+            {
+                throw new Exception("The .frx file is empty or invalid. Please generate a proper template using FastReport Designer or use 'Generate .frx from Data' and then design it in FastReport Designer.");
+            }
+
+            // Register the data source with the correct name
+            report.RegisterData(invoiceItems, "InvoiceItems");
+            
+            // Prepare the report
+            try
+            {
+                report.Prepare();
+            }
+            catch (Exception prepEx)
+            {
+                throw new Exception($"Failed to prepare report. The template may be empty or missing bands. Please ensure your .frx file has Header Band, Data Band, and Footer Band. Error: {prepEx.Message}");
+            }
+
+            // Export to PDF in memory
+            using var pdfExport = new PDFSimpleExport();
+            using var pdfStream = new MemoryStream();
+            
+            // Export method - try different approaches based on FastReport API version
+            try
+            {
+                // Method 1: Export using export object
+                pdfExport.Export(report, pdfStream);
+            }
+            catch (Exception ex1)
+            {
+                try
+                {
+                    // Method 2: Export using report object
+                    pdfStream.SetLength(0);
+                    pdfStream.Position = 0;
+                    report.Export(pdfExport, pdfStream);
+                }
+                catch (Exception ex2)
+                {
+                    // Method 3: Use Show method if available (for debugging)
+                    throw new Exception($"Export failed. Method 1: {ex1.Message}, Method 2: {ex2.Message}");
+                }
+            }
+            
+            pdfStream.Position = 0;
+
+            // Convert to base64 for iframe display
+            var pdfBytes = pdfStream.ToArray();
+            
+            if (pdfBytes.Length == 0)
+            {
+                throw new Exception("Generated PDF is empty. Please check your report template.");
+            }
+            
+            pdfBase64 = Convert.ToBase64String(pdfBytes);
+            uploadError = string.Empty; // Clear any previous errors
+        }
+        catch (Exception ex)
+        {
+            uploadError = $"Error generating PDF: {ex.Message}";
+            if (ex.InnerException != null)
+            {
+                uploadError += $" {ex.InnerException.Message}";
+            }
+            pdfBase64 = string.Empty;
+            Console.WriteLine($"PDF Generation Error: {ex}");
+            Console.WriteLine($"Stack Trace: {ex.StackTrace}");
+        }
+        finally
+        {
+            isGenerating = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task GenerateFrxTemplate()
+    {
+        isGeneratingFrx = true;
+        uploadError = string.Empty;
+        StateHasChanged();
+
+        try
+        {
+            // Create a new FastReport instance
+            using var report = new Report();
+            
+            // FastReport automatically creates a default page
+            // Save the report to a memory stream
+            using var memoryStream = new MemoryStream();
+            report.Save(memoryStream);
+            memoryStream.Position = 0;
+
+            // Get the bytes
+            var frxBytes = memoryStream.ToArray();
+            
+            // Convert to base64 for download
+            var base64String = Convert.ToBase64String(frxBytes);
+            
+            // Trigger download using JavaScript
+            var fileName = "sample-invoice-template.frx";
+            await JSRuntime.InvokeVoidAsync("downloadFile", fileName, base64String, "application/octet-stream");
+            
+            uploadError = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            uploadError = $"Error generating .frx template: {ex.Message}";
+        }
+        finally
+        {
+            isGeneratingFrx = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task GeneratePdfFromData()
+    {
+        if (invoiceItems.Count == 0)
+        {
+            uploadError = "Please add at least one invoice item.";
+            StateHasChanged();
+            return;
+        }
+
+        isGenerating = true;
+        pdfBase64 = string.Empty;
+        uploadError = string.Empty;
+        StateHasChanged();
+
+        try
+        {
+            // FastReport OpenSource doesn't support programmatic report creation
+            // We need a .frx template file to generate PDFs
+            // This method will guide users to use the proper workflow
+            throw new Exception("FastReport OpenSource requires a .frx template file to generate PDFs. Please use 'Generate .frx from Data' to create a template, then upload it and use 'Generate PDF from .frx' button.");
+        }
+        catch (Exception ex)
+        {
+            uploadError = $"Note: {ex.Message}";
+            pdfBase64 = string.Empty;
+            Console.WriteLine($"PDF Generation Error: {ex}");
+        }
+        finally
+        {
+            isGenerating = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task GenerateFrxFromData()
+    {
+        if (invoiceItems.Count == 0)
+        {
+            uploadError = "Please add at least one invoice item to generate a template.";
+            StateHasChanged();
+            return;
+        }
+
+        isGeneratingFrx = true;
+        uploadError = string.Empty;
+        StateHasChanged();
+
+        try
+        {
+            // Create FastReport instance
+            using var report = new Report();
+            
+            // Register the data source so FastReport knows about the structure
+            report.RegisterData(invoiceItems, "InvoiceItems");
+            
+            // Save the report - this creates a basic .frx file
+            // Note: FastReport OpenSource has limited programmatic API,
+            // so this creates a minimal template that can be enhanced in FastReport Designer
+            using var memoryStream = new MemoryStream();
+            report.Save(memoryStream);
+            memoryStream.Position = 0;
+
+            var frxBytes = memoryStream.ToArray();
+            var base64String = Convert.ToBase64String(frxBytes);
+            
+            // Trigger download
+            var fileName = $"invoice-template-{DateTime.Now:yyyyMMdd-HHmmss}.frx";
+            await JSRuntime.InvokeVoidAsync("downloadFile", fileName, base64String, "application/octet-stream");
+            
+            uploadError = string.Empty;
+            
+            // Show success message with instructions
+            uploadedFileName = $"Template generated! IMPORTANT: This is a basic template. To make it work, you need to:";
+            uploadError = string.Empty; // Clear any errors
+        }
+        catch (Exception ex)
+        {
+            uploadError = $"Error generating .frx from data: {ex.Message}";
+            if (ex.InnerException != null)
+            {
+                uploadError += $" {ex.InnerException.Message}";
+            }
+            Console.WriteLine($"FRX Generation Error: {ex}");
+        }
+        finally
+        {
+            isGeneratingFrx = false;
+            StateHasChanged();
+        }
+    }
+}
+
