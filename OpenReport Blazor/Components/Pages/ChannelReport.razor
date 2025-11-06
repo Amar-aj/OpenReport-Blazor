@@ -1,0 +1,388 @@
+@page "/channel-report"
+@using OpenReport_Blazor.Models
+@using FastReport
+@using FastReport.Export.PdfSimple
+@using System.IO
+@using System.Text.Json
+@using Microsoft.JSInterop
+@inject IHttpClientFactory HttpClientFactory
+@inject IJSRuntime JSRuntime
+@rendermode InteractiveServer
+
+<PageTitle>Channel List Report</PageTitle>
+
+<h1>Channel List Report</h1>
+
+<div class="container-fluid mt-4">
+    <div class="row">
+        <!-- Left Column: API Configuration & Controls -->
+        <div class="col-md-6">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5>API Configuration</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label for="apiUrl" class="form-label">API URL</label>
+                        <input type="text" 
+                               class="form-control" 
+                               id="apiUrl" 
+                               @bind="apiUrl" 
+                               placeholder="" />
+                        <small class="form-text text-muted">Enter the API endpoint URL to fetch channel data</small>
+                    </div>
+                    
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-primary" 
+                                @onclick="FetchDataAndGenerateReport" 
+                                disabled="@(isLoading || isGenerating)">
+                            <i class="bi bi-download"></i> Fetch Data & Generate Report
+                        </button>
+                        <button class="btn btn-outline-secondary" 
+                                @onclick="LoadDefaultUrl">
+                            <i class="bi bi-arrow-clockwise"></i> Load Default URL
+                        </button>
+                    </div>
+
+                    @if (isLoading)
+                    {
+                        <div class="alert alert-info mt-3">
+                            <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                            Fetching data from API...
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrEmpty(dataStatus))
+                    {
+                        <div class="alert @(dataStatus.Contains("Error") ? "alert-danger" : "alert-success") mt-3">
+                            <i class="bi @(dataStatus.Contains("Error") ? "bi-exclamation-triangle" : "bi-check-circle")"></i>
+                            @dataStatus
+                        </div>
+                    }
+
+                    @if (channelData != null)
+                    {
+                        <div class="mt-3">
+                            <div class="card bg-light">
+                                <div class="card-body">
+                                    <h6 class="card-title">Data Summary</h6>
+                                    <ul class="list-unstyled mb-0">
+                                        <li><strong>Channels:</strong> @channelData.Channels.Count</li>
+                                        <li><strong>Categories:</strong> @channelData.Categories.Count</li>
+                                        <li><strong>Sliders:</strong> @channelData.Sliders.Count</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <!-- Data Preview (Optional) -->
+            @if (channelData != null && showDataPreview)
+            {
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5>Data Preview</h5>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="ToggleDataPreview">
+                            <i class="bi bi-chevron-up"></i> Hide
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                            <table class="table table-sm table-striped">
+                                <thead class="table-dark sticky-top">
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Name</th>
+                                        <th>Category</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var channel in channelData.Channels.Take(20))
+                                    {
+                                        <tr>
+                                            <td>@channel.Id</td>
+                                            <td>@channel.Name</td>
+                                            <td>@channel.Category</td>
+                                        </tr>
+                                    }
+                                    @if (channelData.Channels.Count > 20)
+                                    {
+                                        <tr>
+                                            <td colspan="3" class="text-center text-muted">
+                                                ... and @(channelData.Channels.Count - 20) more channels
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            }
+            else if (channelData != null)
+            {
+                <div class="card">
+                    <div class="card-body text-center">
+                        <button class="btn btn-sm btn-outline-primary" @onclick="ToggleDataPreview">
+                            <i class="bi bi-chevron-down"></i> Show Data Preview
+                        </button>
+                    </div>
+                </div>
+            }
+        </div>
+
+        <!-- Right Column: PDF Preview -->
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5>PDF Preview</h5>
+                    @if (!string.IsNullOrEmpty(pdfBase64))
+                    {
+                        <button class="btn btn-sm btn-success" @onclick="DownloadPdf">
+                            <i class="bi bi-download"></i> Download PDF
+                        </button>
+                    }
+                </div>
+                <div class="card-body p-0">
+                    @if (isGenerating)
+                    {
+                        <div class="text-center p-5">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Generating PDF...</span>
+                            </div>
+                            <p class="mt-3">Generating PDF report...</p>
+                        </div>
+                    }
+                    else if (string.IsNullOrEmpty(pdfBase64))
+                    {
+                        <div class="text-center p-5 text-muted">
+                            <i class="bi bi-file-earmark-pdf" style="font-size: 4rem;"></i>
+                            <p class="mt-3">Enter API URL and click "Fetch Data & Generate Report" to see the preview.</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <iframe src="data:application/pdf;base64,@pdfBase64" 
+                                style="width: 100%; height: 800px; border: none;"></iframe>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string apiUrl = "";
+    private ChannelListResponse? channelData;
+    private string pdfBase64 = string.Empty;
+    private bool isLoading = false;
+    private bool isGenerating = false;
+    private string dataStatus = string.Empty;
+    private bool showDataPreview = false;
+
+    protected override void OnInitialized()
+    {
+        // Load default URL on initialization
+    }
+
+    private void LoadDefaultUrl()
+    {
+        apiUrl = "";
+        channelData = null;
+        pdfBase64 = string.Empty;
+        dataStatus = string.Empty;
+        StateHasChanged();
+    }
+
+    private void ToggleDataPreview()
+    {
+        showDataPreview = !showDataPreview;
+        StateHasChanged();
+    }
+
+    private async Task FetchDataAndGenerateReport()
+    {
+        if (string.IsNullOrWhiteSpace(apiUrl))
+        {
+            dataStatus = "Error: Please enter an API URL";
+            StateHasChanged();
+            return;
+        }
+
+        isLoading = true;
+        dataStatus = string.Empty;
+        pdfBase64 = string.Empty;
+        channelData = null;
+        StateHasChanged();
+
+        try
+        {
+            // Fetch data from API
+            var httpClient = HttpClientFactory.CreateClient();
+            var response = await httpClient.GetStringAsync(apiUrl);
+            
+            if (string.IsNullOrWhiteSpace(response))
+            {
+                throw new Exception("Empty response from API");
+            }
+
+            // Parse JSON response
+            var options = new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            };
+
+            channelData = JsonSerializer.Deserialize<ChannelListResponse>(response, options);
+
+            if (channelData == null)
+            {
+                throw new Exception("Failed to parse API response");
+            }
+
+            dataStatus = $"Successfully fetched {channelData.Channels.Count} channels, {channelData.Categories.Count} categories, and {channelData.Sliders.Count} sliders";
+
+            // Generate report after fetching data
+            await GenerateReport();
+        }
+        catch (Exception ex)
+        {
+            dataStatus = $"Error fetching data: {ex.Message}";
+            channelData = null;
+            pdfBase64 = string.Empty;
+            Console.WriteLine($"API Fetch Error: {ex}");
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task GenerateReport()
+    {
+        if (channelData == null)
+        {
+            dataStatus = "Error: No data available. Please fetch data first.";
+            StateHasChanged();
+            return;
+        }
+
+        isGenerating = true;
+        pdfBase64 = string.Empty;
+        StateHasChanged();
+
+        try
+        {
+            // Load the channel_list.frx template from wwwroot
+            var wwwrootPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+            var frxPath = Path.Combine(wwwrootPath, "channel_list.frx");
+
+            if (!File.Exists(frxPath))
+            {
+                throw new Exception($"Template file not found: {frxPath}. Please ensure channel_list.frx exists in wwwroot folder.");
+            }
+
+            // Create FastReport instance
+            using var report = new Report();
+            
+            // Load the .frx file
+            report.Load(frxPath);
+
+            // Check if report has pages
+            if (report.Pages.Count == 0)
+            {
+                throw new Exception("The .frx file is empty or invalid.");
+            }
+
+            // Register the data sources with FastReport
+            // FastReport expects the data source names to match what's in the template
+            report.RegisterData(channelData.Channels, "channels");
+            report.RegisterData(channelData.Categories, "category");
+            report.RegisterData(channelData.Sliders, "slider");
+            
+            // Prepare the report
+            try
+            {
+                report.Prepare();
+            }
+            catch (Exception prepEx)
+            {
+                throw new Exception($"Failed to prepare report: {prepEx.Message}. Please check your template configuration.");
+            }
+
+            // Export to PDF in memory
+            using var pdfExport = new PDFSimpleExport();
+            using var pdfStream = new MemoryStream();
+            
+            // Export method - try different approaches based on FastReport API version
+            try
+            {
+                // Method 1: Export using export object
+                pdfExport.Export(report, pdfStream);
+            }
+            catch (Exception ex1)
+            {
+                try
+                {
+                    // Method 2: Export using report object
+                    pdfStream.SetLength(0);
+                    pdfStream.Position = 0;
+                    report.Export(pdfExport, pdfStream);
+                }
+                catch (Exception ex2)
+                {
+                    throw new Exception($"Export failed. Method 1: {ex1.Message}, Method 2: {ex2.Message}");
+                }
+            }
+            
+            pdfStream.Position = 0;
+
+            // Convert to base64 for iframe display
+            var pdfBytes = pdfStream.ToArray();
+            
+            if (pdfBytes.Length == 0)
+            {
+                throw new Exception("Generated PDF is empty. Please check your report template.");
+            }
+            
+            pdfBase64 = Convert.ToBase64String(pdfBytes);
+            dataStatus = "Report generated successfully!";
+        }
+        catch (Exception ex)
+        {
+            dataStatus = $"Error generating PDF: {ex.Message}";
+            if (ex.InnerException != null)
+            {
+                dataStatus += $" {ex.InnerException.Message}";
+            }
+            pdfBase64 = string.Empty;
+            Console.WriteLine($"PDF Generation Error: {ex}");
+            Console.WriteLine($"Stack Trace: {ex.StackTrace}");
+        }
+        finally
+        {
+            isGenerating = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task DownloadPdf()
+    {
+        if (string.IsNullOrEmpty(pdfBase64))
+            return;
+
+        try
+        {
+            var fileName = $"channel-list-report-{DateTime.Now:yyyyMMdd-HHmmss}.pdf";
+            await JSRuntime.InvokeVoidAsync("downloadFile", fileName, pdfBase64, "application/pdf");
+        }
+        catch (Exception ex)
+        {
+            dataStatus = $"Error downloading PDF: {ex.Message}";
+            StateHasChanged();
+        }
+    }
+}
+

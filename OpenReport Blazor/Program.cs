@@ -7,6 +7,9 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
+// Add HttpClient for API calls
+builder.Services.AddHttpClient();
+
 var app = builder.Build();
 
 // Create sample .frx file in wwwroot if it doesn't exist
