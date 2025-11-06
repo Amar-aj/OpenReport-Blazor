@@ -28,7 +28,7 @@
                                class="form-control" 
                                id="apiUrl" 
                                @bind="apiUrl" 
-                               placeholder="" />
+                               placeholder=" " />
                         <small class="form-text text-muted">Enter the API endpoint URL to fetch channel data</small>
                     </div>
                     
@@ -67,9 +67,14 @@
                                 <div class="card-body">
                                     <h6 class="card-title">Data Summary</h6>
                                     <ul class="list-unstyled mb-0">
-                                        <li><strong>Channels:</strong> @channelData.Channels.Count</li>
-                                        <li><strong>Categories:</strong> @channelData.Categories.Count</li>
+                                        <li><strong>Total Channels:</strong> @channelData.Channels.Count</li>
+                                        <li><strong>Total Categories:</strong> @channelData.Categories.Count</li>
                                         <li><strong>Sliders:</strong> @channelData.Sliders.Count</li>
+                                        @if (selectedCategoryIds.Any())
+                                        {
+                                            <li class="mt-2"><strong>Filtered Channels:</strong> @GetFilteredChannels().Count</li>
+                                            <li><strong>Selected Categories:</strong> @selectedCategoryIds.Count</li>
+                                        }
                                     </ul>
                                 </div>
                             </div>
@@ -77,6 +82,86 @@
                     }
                 </div>
             </div>
+
+            <!-- Category Filter -->
+            @if (channelData != null && channelData.Categories.Any())
+            {
+                <div class="card mb-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5>Filter by Category</h5>
+                        <div>
+                            <button class="btn btn-sm btn-outline-primary" @onclick="SelectAllCategories">
+                                Select All
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="DeselectAllCategories">
+                                Clear All
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-2">
+                            <small class="text-muted">
+                                Select categories to include in the report. Only channels from selected categories will be included.
+                            </small>
+                        </div>
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" 
+                                   type="checkbox" 
+                                   id="enableFilter" 
+                                   @bind="enableCategoryFilter" />
+                            <label class="form-check-label" for="enableFilter">
+                                <strong>Enable Category Filter</strong>
+                            </label>
+                        </div>
+                        <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
+                            <table class="table table-sm">
+                                <thead class="table-light sticky-top">
+                                    <tr>
+                                        <th style="width: 50px;">Select</th>
+                                        <th>Category Name</th>
+                                        <th>Channels</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var category in channelData.Categories.OrderBy(c => c.CategoryName))
+                                    {
+                                        var channelCount = channelData.Channels.Count(ch => ch.Category == category.Id);
+                                        var isSelected = selectedCategoryIds.Contains(category.Id);
+                                        <tr>
+                                            <td>
+                                                <input type="checkbox" 
+                                                       class="form-check-input" 
+                                                       checked="@isSelected"
+                                                       disabled="@(!enableCategoryFilter)"
+                                                       @onchange="@((e) => ToggleCategory(category.Id, (bool)e.Value!))" />
+                                            </td>
+                                            <td>@category.CategoryName</td>
+                                            <td>
+                                                <span class="badge bg-secondary">@channelCount</span>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        @if (enableCategoryFilter && selectedCategoryIds.Any())
+                        {
+                            <div class="alert alert-info mt-2 mb-0">
+                                <i class="bi bi-info-circle"></i>
+                                <strong>@selectedCategoryIds.Count</strong> category(ies) selected. 
+                                Report will include <strong>@GetFilteredChannels().Count</strong> channel(s).
+                            </div>
+                        }
+                        else if (enableCategoryFilter && !selectedCategoryIds.Any())
+                        {
+                            <div class="alert alert-warning mt-2 mb-0">
+                                <i class="bi bi-exclamation-triangle"></i>
+                                No categories selected. Please select at least one category to generate the report.
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
 
             <!-- Data Preview (Optional) -->
             @if (channelData != null && showDataPreview)
@@ -99,7 +184,10 @@
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    @foreach (var channel in channelData.Channels.Take(20))
+                                    @{
+                                        var channelsToShow = enableCategoryFilter ? GetFilteredChannels() : channelData.Channels;
+                                    }
+                                    @foreach (var channel in channelsToShow.Take(20))
                                     {
                                         <tr>
                                             <td>@channel.Id</td>
@@ -107,11 +195,23 @@
                                             <td>@channel.Category</td>
                                         </tr>
                                     }
-                                    @if (channelData.Channels.Count > 20)
+                                    @if (channelsToShow.Count > 20)
                                     {
                                         <tr>
                                             <td colspan="3" class="text-center text-muted">
-                                                ... and @(channelData.Channels.Count - 20) more channels
+                                                ... and @(channelsToShow.Count - 20) more channels
+                                                @if (enableCategoryFilter)
+                                                {
+                                                    <span class="badge bg-info ms-2">Filtered</span>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                    @if (enableCategoryFilter && channelsToShow.Count == 0)
+                                    {
+                                        <tr>
+                                            <td colspan="3" class="text-center text-muted">
+                                                No channels match the selected categories.
                                             </td>
                                         </tr>
                                     }
@@ -164,8 +264,20 @@
                     }
                     else
                     {
-                        <iframe src="data:application/pdf;base64,@pdfBase64" 
-                                style="width: 100%; height: 800px; border: none;"></iframe>
+                        <div style="position: relative; width: 100%; height: 800px;">
+                            <iframe id="pdfPreview" 
+                                    style="width: 100%; height: 100%; border: none;"
+                                    title="PDF Preview"></iframe>
+                            @if (!string.IsNullOrEmpty(pdfBase64))
+                            {
+                                <div class="text-center p-2 bg-light border-top">
+                                    <small class="text-muted">
+                                        <i class="bi bi-info-circle"></i> 
+                                        If PDF doesn't display, try downloading it or check browser console for errors.
+                                    </small>
+                                </div>
+                            }
+                        </div>
                     }
                 </div>
             </div>
@@ -174,22 +286,33 @@
 </div>
 
 @code {
-    private string apiUrl = "";
+    private string apiUrl = " ";
     private ChannelListResponse? channelData;
     private string pdfBase64 = string.Empty;
     private bool isLoading = false;
     private bool isGenerating = false;
     private string dataStatus = string.Empty;
     private bool showDataPreview = false;
+    private HashSet<string> selectedCategoryIds = new();
+    private bool enableCategoryFilter = false;
 
     protected override void OnInitialized()
     {
         // Load default URL on initialization
     }
 
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Update PDF preview when pdfBase64 changes
+        if (!firstRender && !string.IsNullOrEmpty(pdfBase64))
+        {
+            await SetPdfPreviewInIframe();
+        }
+    }
+
     private void LoadDefaultUrl()
     {
-        apiUrl = "";
+        apiUrl = " ";
         channelData = null;
         pdfBase64 = string.Empty;
         dataStatus = string.Empty;
@@ -200,6 +323,64 @@
     {
         showDataPreview = !showDataPreview;
         StateHasChanged();
+    }
+
+    private void ToggleCategory(string categoryId, bool isSelected)
+    {
+        if (isSelected)
+        {
+            selectedCategoryIds.Add(categoryId);
+        }
+        else
+        {
+            selectedCategoryIds.Remove(categoryId);
+        }
+        StateHasChanged();
+    }
+
+    private void SelectAllCategories()
+    {
+        if (channelData != null)
+        {
+            selectedCategoryIds = new HashSet<string>(channelData.Categories.Select(c => c.Id));
+        }
+        StateHasChanged();
+    }
+
+    private void DeselectAllCategories()
+    {
+        selectedCategoryIds.Clear();
+        StateHasChanged();
+    }
+
+    private List<Channel> GetFilteredChannels()
+    {
+        if (channelData == null)
+            return new List<Channel>();
+
+        if (!enableCategoryFilter || !selectedCategoryIds.Any())
+        {
+            return channelData.Channels;
+        }
+
+        return channelData.Channels
+            .Where(ch => selectedCategoryIds.Contains(ch.Category))
+            .ToList();
+    }
+
+    private List<Category> GetFilteredCategories()
+    {
+        if (channelData == null)
+            return new List<Category>();
+
+        if (!enableCategoryFilter || !selectedCategoryIds.Any())
+        {
+            return channelData.Categories;
+        }
+
+        return channelData.Categories
+            .Where(cat => selectedCategoryIds.Contains(cat.Id))
+            .ToList();
     }
 
     private async Task FetchDataAndGenerateReport()
@@ -243,6 +424,12 @@
 
             dataStatus = $"Successfully fetched {channelData.Channels.Count} channels, {channelData.Categories.Count} categories, and {channelData.Sliders.Count} sliders";
 
+            // Auto-select all categories when data is first loaded
+            if (!selectedCategoryIds.Any() && channelData.Categories.Any())
+            {
+                selectedCategoryIds = new HashSet<string>(channelData.Categories.Select(c => c.Id));
+            }
+
             // Generate report after fetching data
             await GenerateReport();
         }
@@ -269,6 +456,14 @@
             return;
         }
 
+        // Check if filter is enabled and at least one category is selected
+        if (enableCategoryFilter && !selectedCategoryIds.Any())
+        {
+            dataStatus = "Error: Please select at least one category to generate the report.";
+            StateHasChanged();
+            return;
+        }
+
         isGenerating = true;
         pdfBase64 = string.Empty;
         StateHasChanged();
@@ -284,6 +479,15 @@
                 throw new Exception($"Template file not found: {frxPath}. Please ensure channel_list.frx exists in wwwroot folder.");
             }
 
+            // Get filtered data based on category selection
+            var filteredChannels = GetFilteredChannels();
+            var filteredCategories = GetFilteredCategories();
+
+            if (filteredChannels.Count == 0)
+            {
+                throw new Exception("No channels match the selected categories. Please adjust your filter.");
+            }
+
             // Create FastReport instance
             using var report = new Report();
             
@@ -296,11 +500,11 @@
                 throw new Exception("The .frx file is empty or invalid.");
             }
 
-            // Register the data sources with FastReport
+            // Register the filtered data sources with FastReport
             // FastReport expects the data source names to match what's in the template
-            report.RegisterData(channelData.Channels, "channels");
-            report.RegisterData(channelData.Categories, "category");
-            report.RegisterData(channelData.Sliders, "slider");
+            report.RegisterData(filteredChannels, "channels");
+            report.RegisterData(filteredCategories, "category");
+            report.RegisterData(channelData.Sliders, "slider"); // Sliders are not filtered
             
             // Prepare the report
             try
@@ -348,7 +552,10 @@
             }
             
             pdfBase64 = Convert.ToBase64String(pdfBytes);
-            dataStatus = "Report generated successfully!";
+            var filterInfo = enableCategoryFilter && selectedCategoryIds.Any() 
+                ? $" (Filtered: {filteredChannels.Count} channels from {selectedCategoryIds.Count} categories)"
+                : "";
+            dataStatus = $"Report generated successfully!{filterInfo}";
         }
         catch (Exception ex)
         {
@@ -382,6 +589,27 @@
         {
             dataStatus = $"Error downloading PDF: {ex.Message}";
             StateHasChanged();
+        }
+    }
+
+    private async Task SetPdfPreviewInIframe()
+    {
+        if (string.IsNullOrEmpty(pdfBase64))
+            return;
+
+        try
+        {
+            // Use JavaScript to set the PDF in the iframe using blob URL
+            var result = await JSRuntime.InvokeAsync<bool>("setPdfPreview", "pdfPreview", pdfBase64);
+            if (!result)
+            {
+                Console.WriteLine("Warning: Could not set PDF preview in iframe. PDF may still be available for download.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error setting PDF preview: {ex.Message}");
+            // Don't throw - PDF is still generated, just preview might not work
         }
     }
 }
